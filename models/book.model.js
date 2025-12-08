@@ -1,28 +1,19 @@
 const mongoose = require("mongoose");
 
-const PageSchema = new mongoose.Schema({
-  pageNumber: { type: Number, required: true },
-  content: { type: String, required: true }, // Raw Text
-  imagePrompt: { type: String }, //Generated later by LLM
-  imageUrl: { type: String }, // Generated Lated by AI
-  status: {
-    type: String,
-    enum: ["pending", "processing", "completed", "failed"],
-    default: "pending",
-  },
-});
-
 const BookSchema = new mongoose.Schema({
   title: { type: String, required: true},
   author: { type: String},
   originalFilePath: { type: String, required: true}, // Path to the uploaded file
+
   //Below is for the style guide (context of the characters)
   globalContext: {
     characters: { type: String },
     setting: {type: String},
     artStyle: {type: String}
   },
-  pages: [PageSchema]
+  
+  //We don't need to store an array of Page IDs because the Pages already point to the book. But keeping a count is useful.
+  totalPages: { type: Number, default: 0}
 }, {
     timestamps: true
 });

@@ -7,8 +7,9 @@ const path = require("path");
 const Book = require("../models/book.model");
 const Page = require("../models/page.model");
 
-//Importing Parser
+//Importing Utility functions.
 const { parseFile } = require("../utils/fileParser");
+const { analyzeBookContext } = require("../utils/aiService");
 
 router.post("/upload", upload.single("bookFile"), async (req, res) => {
   try {
@@ -52,12 +53,35 @@ router.post("/upload", upload.single("bookFile"), async (req, res) => {
     });
   } catch (error) {
     console.log("Error in upload route:", error);
-    res
-      .status(500)
-      .json({
-        message: "Server Error during processing",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Server Error during processing",
+      error: error.message,
+    });
+  }
+});
+
+router.post("/:id/analyze", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    //Getting first 3 pages
+    const pages = await Page.find({ bookId: id })
+      .sort({ pageNumber: 1 })
+      .limit(1);
+    if (!pages || pages.length === 0)
+      return res.status(404).json({ message: "Book pages not found" });
+
+    //Combine text
+    const textSnippet = pages.map((p) => p.content).join("\n\n");
+    // console.log(`Sending ${textSnippet.length} characters to Gemini...`);
+
+    //Calling Gemini
+    const styleGuide = await analyzeBookContext(textSnippet);
+    console.log("Gemini Output:", styleGuide);
+    res.send("Analysis Complete");
+  } catch (error) {
+    console.log("Gemimi Analysis Stage Error - ", error);
+    res.status(500).json({ message: "Analysis Failed", error: error.message });
   }
 });
 

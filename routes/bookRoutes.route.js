@@ -64,10 +64,10 @@ router.post("/:id/analyze", async (req, res) => {
   try {
     const { id } = req.params;
 
-    //Getting first 3 pages
+    //Getting first page (change limit value to get n number of pages)(to get a rough global context for art style)
     const pages = await Page.find({ bookId: id })
       .sort({ pageNumber: 1 })
-      .limit(1);
+      .limit(10);
     if (!pages || pages.length === 0)
       return res.status(404).json({ message: "Book pages not found" });
 
@@ -78,7 +78,17 @@ router.post("/:id/analyze", async (req, res) => {
     //Calling Gemini
     const styleGuide = await analyzeBookContext(textSnippet);
     console.log("Gemini Output:", styleGuide);
-    res.send("Analysis Complete");
+
+    const updatedBook = await Book.findByIdAndUpdate(
+      id,
+      { globalContext: styleGuide },
+      { new: true }
+    );
+
+    res.json({
+      message: "Style Guide Analysis Complete",
+      globalContext: updatedBook.globalContext,
+    });
   } catch (error) {
     console.log("Gemimi Analysis Stage Error - ", error);
     res.status(500).json({ message: "Analysis Failed", error: error.message });

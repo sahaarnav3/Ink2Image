@@ -132,4 +132,43 @@ const analyzeBookContext = async (bookTextSnippet) => {
   }
 };
 
-module.exports = { analyzeBookContext };
+/**
+ * PASS 2: Generate Image Prompt
+ * This function turns a page of story text into a visual description
+ * @param {Object} styleGuide
+ * @param {String} pageText - Text each page.
+ * @param {String} previousSummary - (Kind of like a 1 sentence recap of what happened before)
+ */
+const generatePagePrompt = async (styleGuide, pageText, previousSummary) => {
+  const apiTask = async () => {
+    const prompt = `
+    You are a Cinematographer. Write a single, highly-detailed image generation prompt..
+
+    GLOBAL VISUAL RULES:
+    - Art Style: ${styleGuide.artStyle}
+    - Character Designs: ${styleGuide.characters}
+    - Setting/Vibe: ${styleGuide.setting}
+
+    STORY CONTEXT:
+    - Previous Action: ${previousSummary}
+    - Current Scene Text: "${pageText}"
+
+    TASK:
+    Write a 50-word visual prompt for an AI image generator.
+    - Focus on the visual action (e.g., "A tall man with a scar holding a lantern").
+    - Describe lighting and camera angle.
+    - Do NOT use proper names (like "Harry"), use visual descriptions (like "The boy with glasses").
+    - Output JUST the prompt text. No markdown. No "Sure, here it is."
+    `;
+
+    const result = await genAI.models.generateContent({
+      model: "gemma-3-27b-it",
+      contents: prompt,
+    });
+    console.log("Image prompt text:", result.text.trim());
+    return result.text.trim();
+  };
+  return await runWithRetry(apiTask);
+};
+
+module.exports = { analyzeBookContext, generatePagePrompt };

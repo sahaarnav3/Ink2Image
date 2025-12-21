@@ -12,8 +12,11 @@ const { parseFile } = require("../utils/fileParser");
 const {
   analyzeBookContext,
   generatePagePrompt,
+  summarizeForContinuity
 } = require("../utils/aiService");
 
+
+// Uploading the book and segeragating the pages.
 router.post("/upload", upload.single("bookFile"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No File Uploaded" });
@@ -69,7 +72,7 @@ router.post("/:id/analyze", async (req, res) => {
     const { id } = req.params;
     console.log(`\n--- Starting Prompt Generation Loop for Book ID: ${id} ---`);
 
-    //Getting first page (change limit value to get n number of pages)(to get a rough global context for art style)
+    //Getting first n page (change limit value to get n number of pages)(to get a rough global context for art style)
     const pages = await Page.find({ bookId: id })
       .sort({ pageNumber: 1 })
       .limit(10);
@@ -130,7 +133,7 @@ router.post("/:id/generate-prompts", async (req, res) => {
       //Skipping the page if we already have a prompt for it.
       if (page.imagePrompt && page.imagePrompt.length > 20) {
         console.log(`Skipping Page ${page.pageNumber}. (Already Done)`);
-        previousPageSummary = `Scene continuation from page ${page.pageNumber}`;
+        previousPageSummary = await summarizeForContinuity(page.content);
         continue;
       }
       console.log(`\n 📜 Processing Page ${page.pageNumber}`);
@@ -147,8 +150,8 @@ router.post("/:id/generate-prompts", async (req, res) => {
       await page.save();
       console.log(`\n --> Generated: "${newPrompt.substring(0, 40)}..."`);
 
-      //We take first 150 chars of this page as the summary for the next page
-      previousPageSummary = page.content.substring(0, 150) + "...";
+      //We use AI to generate a 1 line summary (instead of using substring - previous approach)
+      previousPageSummary = await summarizeForContinuity(page.content);
 
       //Safety Pause - 2 seconds wait before moving to next page so Rate Limiting is followed.
       await new Promise((resolve) => setTimeout(resolve, 2000));

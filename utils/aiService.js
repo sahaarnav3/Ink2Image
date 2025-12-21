@@ -171,4 +171,20 @@ const generatePagePrompt = async (styleGuide, pageText, previousSummary) => {
   return await runWithRetry(apiTask);
 };
 
-module.exports = { analyzeBookContext, generatePagePrompt };
+/**
+ * Using AI to generate summary of the previous page
+ * Previous approach was roughly taking a 0-150 words substring and pass it to AI prompt with the new page content.
+ */
+const summarizeForContinuity = async (pageText) => {
+  const apiTask = async () => {
+    const prompt = `Summarize the key visual and plot events of this page in 1 short sentence for an illustrator: "${pageText}"`;
+    const result = await genAI.models.generateContent({
+      model: "gemma-3-27b-it",
+      contents: prompt,
+    });
+    return result.text.trim();
+  };
+  return await runWithRetry(apiTask);
+};
+
+module.exports = { analyzeBookContext, generatePagePrompt, summarizeForContinuity };

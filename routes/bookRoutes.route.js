@@ -12,9 +12,9 @@ const { parseFile } = require("../utils/fileParser");
 const {
   analyzeBookContext,
   generatePagePrompt,
-  summarizeForContinuity
+  summarizeForContinuity,
 } = require("../utils/aiService");
-
+const { generateAndUploadImage } = require("../utils/imageService");
 
 // Uploading the book and segeragating the pages.
 router.post("/upload", upload.single("bookFile"), async (req, res) => {
@@ -146,7 +146,7 @@ router.post("/:id/generate-prompts", async (req, res) => {
       );
 
       page.imagePrompt = newPrompt;
-      page.status = "completed";
+      page.status = "processing";
       await page.save();
       console.log(`\n --> Generated: "${newPrompt.substring(0, 40)}..."`);
 
@@ -170,6 +170,78 @@ router.post("/:id/generate-prompts", async (req, res) => {
     res
       .status(500)
       .json({ message: "Generation failed", error: error.message });
+  }
+});
+
+//Route to generate actual images
+//URL: POST /api/books/:id/generate-images // body - { startPage, endPage }
+//Instead of batch processing (creating pages of all pages at once) I am doing On-demand buffering.
+router.post("/:id/generate-images", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { startPage, endPage } = req.body;
+    console.log("\n 🚀 Starting Pass 3: Image Generation for Book", id, "---");
+    console.log(
+      `\n--- 🚀 Generating Image Buffer: Pages ${startPage} to ${endPage} --- `
+    );
+
+    //Fetch pages which have prompts but NO images
+    const pages = await Page.find({
+      bookId: id,
+      pageNumber: { $gte: startPage, $lte: endPage },
+      imagePrompt: { $exists: true, $ne: "" }, // image exists and !== ""
+    }).sort({ pageNumber: 1 });
+
+    if (pages.length === 0)
+      return res.json(200).json({ message: "No pending images to generate." });
+
+    console.log(`Found ${pages.length} pages ready for visualization.`);
+
+    let newlyGenerated = 0;
+
+    for (const page of pages) {
+      if (page.imageUrl) {
+        console.log(
+          `🎨 Image already exists for Page: ${page.pageNumber}... Moving onto next page.`
+        );
+        continue;
+      }
+
+      console.log(`🎨 Processing Buffer: Page ${page.pageNumber}...`);
+      try {
+        const driveUrl = await generateAndUploadImage(
+          page.imagePrompt,
+          id,
+          page.pageNumber
+        );
+        page.imageUrl = driveUrl;
+        page.status = "completed";
+        await page.save();
+
+        newlyGenerated++;
+
+        //Rate Limit: 5 second for Image API Health
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      } catch (error) {
+        console.error(`❌ Error on Page: ${page.pageNumber}:`, error.message);
+        // continue; //Continuing to next page in buffer if one fails
+        return res.status(429).json({
+          message: `❌ Error on Page: ${page.pageNumber}:, ${error.message}`,
+          range: `${startPage} - ${endPage}`,
+          newlyGenerated,
+        });
+      }
+    }
+    res.status(200).json({
+      message: "Buffer Updated",
+      range: `${startPage} - ${endPage}`,
+      newlyGenerated,
+    });
+  } catch (error) {
+    console.log("Buffer Generation Error:", error);
+    res
+      .status(500)
+      .json({ message: "Range Processing Failed.", error: error.message });
   }
 });
 

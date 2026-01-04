@@ -223,9 +223,9 @@ router.post("/:id/generate-images", async (req, res) => {
         //Rate Limit: 5 second for Image API Health
         await new Promise((resolve) => setTimeout(resolve, 5000));
       } catch (error) {
-        console.error(`❌ Error on Page: ${page.pageNumber}:`, error.message);
+        console.error(`❌ Error on Page ${page.pageNumber}:`, error.message);
         // continue; //Continuing to next page in buffer if one fails
-        return res.status(429).json({
+        return res.status(400).json({
           message: `❌ Error on Page: ${page.pageNumber}:, ${error.message}`,
           range: `${startPage} - ${endPage}`,
           newlyGenerated,

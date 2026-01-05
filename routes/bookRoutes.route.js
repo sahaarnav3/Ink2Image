@@ -21,7 +21,7 @@ router.post("/upload", upload.single("bookFile"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No File Uploaded" });
 
-    console.log("File Uploaded:", req.file.path);
+    console.log("\n📁 File Uploaded:", req.file.path);
 
     //Create a new book document
     const newBook = new Book({
@@ -30,11 +30,11 @@ router.post("/upload", upload.single("bookFile"), async (req, res) => {
     });
 
     const savedBook = await newBook.save();
-    console.log("book created with ID:", savedBook._id);
+    console.log("\n📚 Book created with ID:", savedBook._id);
 
     //File processing(To extract the text)
     const pageContent = await parseFile(req.file.path);
-    console.log(`Successfully Extracted ${pageContent.length} pages.(Roughly)`);
+    console.log(`\n📄 Successfully Extracted ${pageContent.length} pages.(Roughly)`);
 
     const pageDocuments = pageContent.map((content, index) => ({
       bookId: savedBook._id,
@@ -45,11 +45,11 @@ router.post("/upload", upload.single("bookFile"), async (req, res) => {
 
     //Bulk inserting pages
     const pageResponse = await Page.insertMany(pageDocuments);
-    // console.log("Page inserting to DB:", pageResponse);
+    // console.log("\nPage inserting to DB:", pageResponse);
 
     savedBook.totalPages = pageContent.length;
     const savingPageOnBooks = await savedBook.save();
-    console.log("Pages Saved in Book:", savingPageOnBooks);
+    console.log("\n📜 Pages Saved in Book:", savingPageOnBooks);
 
     res.status(201).json({
       message: "Book uploaded and processed successfully!",
@@ -58,7 +58,7 @@ router.post("/upload", upload.single("bookFile"), async (req, res) => {
       firstPagePreview: pageContent[0].substring(0, 100) + "...",
     });
   } catch (error) {
-    console.log("Error in upload route:", error);
+    console.log("\n❌ Error in upload route:", error);
     res.status(500).json({
       message: "Server Error during processing",
       error: error.message,
@@ -81,11 +81,11 @@ router.post("/:id/analyze", async (req, res) => {
 
     //Combine text
     const textSnippet = pages.map((p) => p.content).join("\n\n");
-    // console.log(`Sending ${textSnippet.length} characters to Gemini...`);
+    // console.log(`\n⬆️ Sending ${textSnippet.length} characters to Gemini...`);
 
     //Calling Gemini
     const styleGuide = await analyzeBookContext(textSnippet);
-    console.log("Gemini Output:", styleGuide);
+    console.log("\n🤖 Gemini Output:", styleGuide);
 
     const updatedBook = await Book.findByIdAndUpdate(
       id,
@@ -98,7 +98,7 @@ router.post("/:id/analyze", async (req, res) => {
       globalContext: updatedBook.globalContext,
     });
   } catch (error) {
-    console.log("Gemimi Analysis Stage Error - ", error);
+    console.log("\n🤖 Gemimi Analysis Stage Error - ", error);
     res.status(500).json({ message: "Analysis Failed", error: error.message });
   }
 });
@@ -121,7 +121,7 @@ router.post("/:id/generate-prompts", async (req, res) => {
       });
 
     console.log(
-      `Found ${pages.length} pages. Using style guide:`,
+      `\n Found ${pages.length} pages. Using style guide:`,
       book.globalContext.artStyle
     );
 
@@ -132,11 +132,11 @@ router.post("/:id/generate-prompts", async (req, res) => {
     for (let page of pages) {
       //Skipping the page if we already have a prompt for it.
       if (page.imagePrompt && page.imagePrompt.length > 20) {
-        console.log(`Skipping Page ${page.pageNumber}. (Already Done)`);
+        console.log(`\n⏭️ Skipping Page ${page.pageNumber}. (Already Done)`);
         previousPageSummary = await summarizeForContinuity(page.content);
         continue;
       }
-      console.log(`\n 📜 Processing Page ${page.pageNumber}`);
+      console.log(`\n📜 Processing Page ${page.pageNumber}`);
 
       //Now calling the AI function to actually create the prompt.
       const newPrompt = await generatePagePrompt(
@@ -148,7 +148,7 @@ router.post("/:id/generate-prompts", async (req, res) => {
       page.imagePrompt = newPrompt;
       page.status = "processing";
       await page.save();
-      console.log(`\n --> Generated: "${newPrompt.substring(0, 40)}..."`);
+      console.log(`\n--> Generated: "${newPrompt.substring(0, 40)}..."`);
 
       //We use AI to generate a 1 line summary (instead of using substring - previous approach)
       previousPageSummary = await summarizeForContinuity(page.content);
@@ -180,9 +180,9 @@ router.post("/:id/generate-images", async (req, res) => {
   try {
     const { id } = req.params;
     const { startPage, endPage } = req.body;
-    console.log("\n 🚀 Starting Pass 3: Image Generation for Book", id, "---");
+    console.log("\n🚀 Starting Pass 3: Image Generation for Book", id, "---");
     console.log(
-      `\n--- 🚀 Generating Image Buffer: Pages ${startPage} to ${endPage} --- `
+      `\n---🚀 Generating Image Buffer: Pages ${startPage} to ${endPage} --- `
     );
 
     //Fetch pages which have prompts but NO images
@@ -195,19 +195,19 @@ router.post("/:id/generate-images", async (req, res) => {
     if (pages.length === 0)
       return res.json(200).json({ message: "No pending images to generate." });
 
-    console.log(`Found ${pages.length} pages ready for visualization.`);
+    console.log(`\nFound ${pages.length} pages ready for visualization.`);
 
     let newlyGenerated = 0;
 
     for (const page of pages) {
       if (page.imageUrl) {
         console.log(
-          `🎨 Image already exists for Page: ${page.pageNumber}... Moving onto next page.`
+          `\n🎨 Image already exists for Page: ${page.pageNumber}... Moving onto next page.`
         );
         continue;
       }
 
-      console.log(`🎨 Processing Buffer: Page ${page.pageNumber}...`);
+      console.log(`\n🎨 Processing Buffer: Page ${page.pageNumber}...`);
       try {
         const driveUrl = await generateAndUploadImage(
           page.imagePrompt,
@@ -221,9 +221,10 @@ router.post("/:id/generate-images", async (req, res) => {
         newlyGenerated++;
 
         //Rate Limit: 5 second for Image API Health
+        console.log("\n🖼️ Image Generated & Uploaded. Waiting 5 second before generating next.")
         await new Promise((resolve) => setTimeout(resolve, 5000));
       } catch (error) {
-        console.error(`❌ Error on Page ${page.pageNumber}:`, error.message);
+        console.error(`\n❌ Error on Page ${page.pageNumber}:`, error.message);
         // continue; //Continuing to next page in buffer if one fails
         return res.status(400).json({
           message: `❌ Error on Page: ${page.pageNumber}:, ${error.message}`,
@@ -238,7 +239,7 @@ router.post("/:id/generate-images", async (req, res) => {
       newlyGenerated,
     });
   } catch (error) {
-    console.log("Buffer Generation Error:", error);
+    console.log("\n❌ Buffer Generation Error:", error);
     res
       .status(500)
       .json({ message: "Range Processing Failed.", error: error.message });

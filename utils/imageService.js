@@ -3,6 +3,7 @@ require("dotenv").config();
 const { google } = require("googleapis");
 const { Storage } = require('@google-cloud/storage');
 const fs = require("fs");
+const sharp = require("sharp");
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const genAI = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
@@ -53,7 +54,7 @@ const runWithRetry = async (fn, apiName = "API", retries = 5, delay = 1000) => {
 //Main Function
 const generateAndUploadImage = async (prompt, bookId, pageNumber) => {
   const mainApi = async () => {
-    const filePath = "generatedImage.png";
+    const filePath = "generatedImage.webp";
     console.log("\n🖼️ Generating image for Page " + pageNumber + "...");
 
     // Below Logic will be used to generate image using Gemini 'Nano Banana' and storing it in a file names generatedImage.png
@@ -65,7 +66,7 @@ const generateAndUploadImage = async (prompt, bookId, pageNumber) => {
     // for (const part of responseUsingNanoBanana.candidates[0].content.parts) {
     //   if (part.inlineData) {
     //     const buffer = Buffer.from(part.inlineData.data, "base64");
-    //     console.log("\n Image Generated. Uploading to google drive...");
+    //     console.log("\nImage Generated. Uploading to google drive...");
     //     fs.writeFileSync(filePath, buffer);
     //   }
     // }
@@ -76,23 +77,25 @@ const generateAndUploadImage = async (prompt, bookId, pageNumber) => {
       prompt: prompt,
       config: {
         numberOfImages: 1,
+        aspectRatio: '3:4',
       },
     });
     for (const generatedImage of responseUsingImagen.generatedImages) {
       if (generatedImage.image.imageBytes) {
         const buffer = Buffer.from(generatedImage.image.imageBytes, "base64");
+        const optimizedBuffer = await sharp(buffer).webp({ quality: 80 }).toBuffer();
         console.log("\nImage Generated.");
-        fs.writeFileSync(filePath, buffer);
+        fs.writeFileSync(filePath, optimizedBuffer);
       } else
         throw new Error(
           "Image Generation error from IMAGEN. Please Try Again."
         );
     }
 
-    // console.log("Uploading Image to Google Drive...");
+    // console.log("\nUploading Image to Google Drive...");
     // const imageLink = await uploadImageToDrive(filePath, bookId, pageNumber);
 
-    console.log("Uploading Image to Google Cloud Storage...");
+    console.log("\nUploading Image to Google Cloud Storage...");
     const imageLink = await uploadImageToCloud(filePath, bookId, pageNumber);
 
     //Deleting image from local if it is successfully saved in drive
@@ -124,8 +127,8 @@ const uploadImageToDrive = async (filePath, bookId, pageNumber) => {
       parents: [process.env.GOOGLE_DRIVE_FOLDER_ID],
     };
     const media = {
-      mimeType: "image/png",
-      body: fs.createReadStream("generatedImage.png"),
+      mimeType: "image/png", // check this once
+      body: fs.createReadStream(filePath),
     };
     const driveResponse = await drive.files.create({
       resource: fileMetaData,
@@ -161,16 +164,16 @@ const uploadImageToDrive = async (filePath, bookId, pageNumber) => {
 //Function to upload image to google cloud storage GCS with retries
 const uploadImageToCloud = async (filePath, bookId, pageNumber) => {
   const mainApi = async () => {
-    const fileName = `book_${bookId}_page_${pageNumber}.png`;
+    const fileName = `book_${bookId}_page_${pageNumber}.webp`;
     await storage.bucket(bucketName).upload(filePath, {
       destination: fileName
     });
-    console.log(`${filePath} uploaded to ${bucketName}/${fileName}`);
+    // console.log(`\n${filePath} uploaded to ${bucketName}/${fileName}`);
 
     //Making file publicly accessible 
     await storage.bucket(bucketName).file(fileName).makePublic();
     const publicUrl = `https://storage.googleapis.com/${bucketName}/${fileName}`;
-    console.log("GCS Generated Public URL :-", publicUrl);
+    // console.log("\nGCS Generated Public URL :-", publicUrl);
     return publicUrl;
   };
   try {

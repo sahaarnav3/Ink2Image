@@ -83,7 +83,7 @@ const generateAndUploadImage = async (prompt, bookId, pageNumber) => {
     for (const generatedImage of responseUsingImagen.generatedImages) {
       if (generatedImage.image.imageBytes) {
         const buffer = Buffer.from(generatedImage.image.imageBytes, "base64");
-        const optimizedBuffer = await sharp(buffer).webp({ quality: 80 }).toBuffer();
+        const optimizedBuffer = await sharp(buffer).webp({ quality: 80 }).toBuffer()
         console.log("\nImage Generated.");
         fs.writeFileSync(filePath, optimizedBuffer);
       } else

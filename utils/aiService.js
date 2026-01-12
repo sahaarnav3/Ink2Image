@@ -1,6 +1,7 @@
 const { GoogleGenAI, Type } = require("@google/genai");
 require("dotenv").config();
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const { generateAndUploadImage } = require("./imageService");
 
 const genAI = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
@@ -10,10 +11,8 @@ const genAI = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 const cleanAndParseJSON = (text) => {
   // 1. Remove the first line if it starts with ```json or ```
   let cleanText = text.replace(/^```json\s*/, "").replace(/^```\s*/, "");
-
   // 2. Remove the last line if it ends with ```
   cleanText = cleanText.replace(/```\s*$/, "");
-
   // 3. Trim extra whitespace
   return JSON.parse(cleanText.trim());
 };
@@ -52,39 +51,15 @@ const analyzeBookContext = async (bookTextSnippet) => {
   const mainApiTask = async () => {
     // console.log("book snippet:", bookTextSnippet);
 
-    //Selecting the model
-    // const model = genAI.getGenerativeModel({
-    //   model: "gemini-2.5-flash",
-    //   generationConfig: {
-    //     type: Type.OBJECT,
-    //     properties: {
-    //       artStyle: { type: Type.STRING },
-    //       characters: { type: Type.STRING },
-    //       setting: { type: Type.STRING },
-    //     },
-    //   },
-    // });
-
     // The Prompt
-    //Below prompt is for gemini model
-    // const prompt = `
-    // You are an expert Art Director. Analyze the following story segement.
-
-    // Extract a "Style Guide" that will be used to generate consistent illustrations for the rest of the book.
-    // - artStyle: Describe the visual style (e.g., "Watercolor, Studio Ghibli style").
-    // - characters: Summarize main characters and their physical traits.
-    // - setting: Describe the primary environment.
-
-    // Story Segment:
-    // ${bookTextSnippet}
-    // `;
-
-    //Below prompt is for Gemma model.(Gemma doesn't support native JSON through Google Gemini SDK but it does support production of structured output.)
     const prompt = `
     You are a professional Hollywood Concept Artist acting as a strict JSON-only API.
 
-    TASK: Analyze the provided story segment and extract a detailed "Style Guide" for image generation.
-    Focus on SENSORY details (lighting, texture, camera angles, materials), not just simple lists.
+    TASK: 
+    - Extract the official Title and Author from the text.
+    - If Title/Author are not explicitly found, creatively generate a professional Title based on the themes(not more than 4 words) and set Author to "Unknown Storyteller".
+    - Analyze the provided story segment and extract a detailed "Style Guide" for image generation.
+    - Analyze the visual "Style Guide" for image generation. Focus on SENSORY details (lighting, texture, camera angles).
 
     OUTPUT RULES:
     1. Return ONLY a single valid JSON object.
@@ -93,6 +68,8 @@ const analyzeBookContext = async (bookTextSnippet) => {
     4. The JSON must strictly follow this structure:
 
     {
+      "title": "The name of book",
+      "author": "The name of the author"
       "artStyle": "Detailed visual style description (e.g., 'Cinematic lighting, 35mm film grain, watercolor texture, deep shadows')",
       "characters": "Rich descriptions of appearance, clothing materials, facial features, and specific vibes",
       "setting": "Atmospheric description of the environment, weather, architecture, and color palette"
@@ -104,23 +81,25 @@ const analyzeBookContext = async (bookTextSnippet) => {
 
     //Selecting model and generating the text accordingly.
     const response = await genAI.models.generateContent({
-      // model: "gemini-2.5-flash",
-      model: "gemma-3-27b-it",
-      // config: {
-      //   responseMimeType: "application/json",
-      //   type: Type.OBJECT,
-      //   properties: {
-      //     artStyle: { type: Type.STRING },
-      //     characters: { type: Type.STRING },
-      //     setting: { type: Type.STRING },
-      //   },
-      // },
+      model: "gemini-2.5-flash",
+      // model: "gemma-3-27b-it",
+      config: {
+        responseMimeType: "application/json",
+        type: Type.OBJECT,
+        properties: {
+          title: { type: Type.STRING },
+          author: { type: Type.STRING },
+          artStyle: { type: Type.STRING },
+          characters: { type: Type.STRING },
+          setting: { type: Type.STRING },
+        },
+      },
       contents: prompt,
     });
 
     // console.log("response from gemini in service:", response);
     const text = response.text;
-    console.log("Actual gemini text in service:", text);
+    // console.log("Actual gemini text in service:", text);
     const styleGuide = cleanAndParseJSON(text);
     return styleGuide;
   };
@@ -162,13 +141,18 @@ const generatePagePrompt = async (styleGuide, pageText, previousSummary) => {
     `;
 
     const result = await genAI.models.generateContent({
-      model: "gemma-3-27b-it",
+      model: "gemini-2.5-flash",
       contents: prompt,
     });
-    console.log("Image prompt text:", result.text.trim());
+    // console.log("Image prompt text:", result.text.trim());
     return result.text.trim();
   };
-  return await runWithRetry(apiTask);
+  try {
+    return await runWithRetry(apiTask);
+  } catch (error) {
+    console.error("Gemini Error after retries :-", error);
+    throw new Error("Failed to generate Page Prompts after multiple attempts.");
+  }
 };
 
 /**
@@ -179,12 +163,51 @@ const summarizeForContinuity = async (pageText) => {
   const apiTask = async () => {
     const prompt = `Summarize the key visual and plot events of this page in 1 short sentence for an illustrator: "${pageText}"`;
     const result = await genAI.models.generateContent({
-      model: "gemma-3-27b-it",
+      model: "gemini-2.5-flash",
       contents: prompt,
     });
     return result.text.trim();
   };
-  return await runWithRetry(apiTask);
+  try {
+    return await runWithRetry(apiTask);
+  } catch (error) {
+    console.error("Gemini Error after retries :-", error);
+    throw new Error(
+      "Failed to generate Previous Page Summary after multiple attempts."
+    );
+  }
 };
 
-module.exports = { analyzeBookContext, generatePagePrompt, summarizeForContinuity };
+const generateCharacterSheet = async (
+  bookId,
+  characterDescription,
+  styleVibe
+) => {
+  try {
+    console.log("\n🎨 Generating Master Character Sheet...");
+
+    const prompt = `
+    A professional character concept sheet for a story. 
+    Character: ${characterDescription}. 
+    Style: ${styleVibe}. 
+    Composition: Three full-body views of the same character (front, profile, and back) on a neutral grey background. 
+    Highly detailed, consistent facial features, uniform clothing.`;
+
+    const sheetUrl = await generateAndUploadImage(
+      prompt,
+      bookId,
+      "MASTER_CHARACTER"
+    );
+    return sheetUrl;
+  } catch (error) {
+    console.log("Character Sheet Error:", error);
+    throw error;
+  }
+};
+
+module.exports = {
+  analyzeBookContext,
+  generatePagePrompt,
+  summarizeForContinuity,
+  generateCharacterSheet,
+};

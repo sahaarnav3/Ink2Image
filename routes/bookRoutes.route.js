@@ -1,11 +1,13 @@
 const express = require("express");
 const router = express.Router();
 const { upload } = require("../middlewares/multer.middleware");
+const { userAuth } = require("../middlewares/userAuth.js");
 const path = require("path");
 
 // Models
 const Book = require("../models/book.model");
 const Page = require("../models/page.model");
+const UserLibrary = require("../models/userLibrary.model");
 
 //Importing Utility functions.
 const { parseFilePageByPage } = require("../utils/fileParser");
@@ -17,57 +19,83 @@ const {
 const { generateAndUploadImage } = require("../utils/imageService");
 
 // Uploading the book and segeragating the pages.
-router.post("/upload", upload.single("bookFile"), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ message: "No File Uploaded" });
+router.post(
+  "/upload",
+  upload.single("bookFile"),
+  userAuth,
+  async (req, res) => {
+    try {
+      if (!req.file)
+        return res.status(400).json({ message: "No File Uploaded" });
 
-    console.log("\n📁 File Uploaded:", req.file.path);
+      console.log("\n📁 File Uploaded:", req.file.path);
 
-    //Create a new book document
-    const newBook = new Book({
-      title: req.body.title || req.file.originalname,
-      originalFilePath: req.file.path,
-    });
+      //Create a new book document
+      const newBook = new Book({
+        title: req.body.title || req.file.originalname,
+        originalFilePath: req.file.path,
+      });
 
-    const savedBook = await newBook.save();
-    console.log("\n📚 Book created with ID:", savedBook._id);
+      const savedBook = await newBook.save();
+      console.log("\n📚 Book created with ID:", savedBook._id);
 
-    //File processing(To extract the text)
-    const pageContent = await parseFilePageByPage(req.file.path); // work on this line here, we need per page analysis according to book.
-    console.log(`\n📄 Successfully Extracted ${pageContent.length} pages.`);
+      //File processing(To extract the text)
+      const pageContent = await parseFilePageByPage(req.file.path); // work on this line here, we need per page analysis according to book.
+      console.log(`\n📄 Successfully Extracted ${pageContent.length} pages.`);
 
-    const pageDocuments = pageContent.map((content, index) => ({
-      bookId: savedBook._id,
-      pageNumber: index + 1,
-      content: content,
-      status: "pending",
-    }));
+      const pageDocuments = pageContent.map((content, index) => ({
+        bookId: savedBook._id,
+        pageNumber: index + 1,
+        content: content,
+        status: "pending",
+      }));
 
-    //Bulk inserting pages
-    const pageResponse = await Page.insertMany(pageDocuments);
-    // console.log("\nPage inserting to DB:", pageResponse);
+      //Bulk inserting pages
+      const pageResponse = await Page.insertMany(pageDocuments);
+      // console.log("\nPage inserting to DB:", pageResponse);
 
-    savedBook.totalPages = pageContent.length;
-    const savingPageOnBooks = await savedBook.save();
-    console.log("\n📜 Pages Saved in Book:", savingPageOnBooks);
+      savedBook.totalPages = pageContent.length;
+      const savingPageOnBooks = await savedBook.save();
+      console.log("\n📜 Pages Saved in Book:", savingPageOnBooks.totalPages);
 
-    res.status(201).json({
-      message: "Book uploaded and processed successfully!",
-      bookId: savedBook._id,
-      totalPages: savedBook.totalPages,
-      firstPagePreview: pageContent[0].substring(0, 100) + "...",
-    });
-  } catch (error) {
-    console.log("\n❌ Error in upload route:", error);
-    res.status(500).json({
-      message: "Server Error during processing",
-      error: error.message,
-    });
+      //Linking User to Book in their private library
+      const userLibrary = await UserLibrary.findOneAndUpdate(
+        {
+          userId: req.user._id,
+          bookId: savedBook._id,
+        },
+        {
+          $setOnInsert: {
+            userId: req.user._id,
+            bookId: savedBook._id,
+          },
+        },
+        {
+          upsert: true,
+          new: true,
+        }
+      );
+
+      res.status(201).json({
+        message:
+          "Book uploaded & processed successfully. Book added to library",
+        bookId: savedBook._id,
+        totalPages: savedBook.totalPages,
+        libraryId: userLibrary._id,
+        firstPagePreview: pageContent[0].substring(0, 100) + "...",
+      });
+    } catch (error) {
+      console.log("\n❌ Error in upload route:", error);
+      res.status(500).json({
+        message: "Server Error during processing",
+        error: error.message,
+      });
+    }
   }
-});
+);
 
 //Route to analyze and generate artStyle, characters and setting.
-router.post("/:id/analyze", async (req, res) => {
+router.post("/:id/analyze", userAuth, async (req, res) => {
   try {
     const { id } = req.params;
     console.log(`\n--- Starting Prompt Generation Loop for Book ID: ${id} ---`);
@@ -123,7 +151,7 @@ router.post("/:id/analyze", async (req, res) => {
 });
 
 //Route to generate the actual image prompts of all the pages (by book id)
-router.post("/:id/generate-prompts", async (req, res) => {
+router.post("/:id/generate-prompts", userAuth, async (req, res) => {
   try {
     const { id } = req.params;
     console.log(
@@ -196,7 +224,7 @@ router.post("/:id/generate-prompts", async (req, res) => {
 //Route to generate actual images
 //URL: POST /api/books/:id/generate-images // body - { startPage, endPage }
 //Instead of batch processing (creating pages of all pages at once) I am doing On-demand buffering.
-router.post("/:id/generate-images", async (req, res) => {
+router.post("/:id/generate-images", userAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const { startPage, endPage } = req.body;
@@ -267,6 +295,20 @@ router.post("/:id/generate-images", async (req, res) => {
     res
       .status(500)
       .json({ message: "Range Processing Failed.", error: error.message });
+  }
+});
+
+//Route to get all the books related to logged in user.
+router.get("/my-library", userAuth, async (req, res) => {
+  try {
+    // Find all books in THIS user's library and pull the Book details
+        const userBooks = await UserLibrary.find({ userId: req.user._id })
+            .populate('bookId') // This merges the Book metadata into the result
+            .sort({ addedAt: -1 });
+
+        res.json(userBooks);
+  } catch (error) {
+    res.status(500).json({ message: "Server Error" });
   }
 });
 

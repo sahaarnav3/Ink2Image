@@ -4,6 +4,9 @@ const router = express.Router();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
+//Middlewares
+const { userAuth } = require("../middlewares/userAuth");
+
 // Models
 const User = require("../models/user.model");
 
@@ -11,8 +14,9 @@ const User = require("../models/user.model");
 router.post("/register", async (req, res) => {
   const { username, email, password } = req.body;
   try {
-    let user = await User.find({ "email": email });
-    if (user._id) return res.status(409).json({ message: "User Already Exists.", user });
+    let user = await User.find({ email: email });
+    if (user._id)
+      return res.status(409).json({ message: "User Already Exists.", user });
 
     //hashing the password
     const salt = bcrypt.genSaltSync(10);
@@ -30,11 +34,15 @@ router.post("/register", async (req, res) => {
     });
   } catch (error) {
     console.log("User Registration Error:", error);
-    if(error.keyValue.email)
-      res.status(500).json({ message: "Email ID already exists. Try again with another Email." });
+    if (error.keyValue.email)
+      res.status(500).json({
+        message: "Email ID already exists. Try again with another Email.",
+      });
     else if (error.keyValue.username)
-      res.status(500).json({ message: "Username already exists. Try again with another Username." });
-    if(error._message == 'User validation failed' )
+      res.status(500).json({
+        message: "Username already exists. Try again with another Username.",
+      });
+    if (error._message == "User validation failed")
       res.status(500).send("Please write email in proper format.");
     res.status(500).send("Server Error");
   }
@@ -63,12 +71,26 @@ router.post("/login", async (req, res) => {
       expiresIn: `7d`,
     });
     res.cookie("token", token, {
-        expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-    }); 
+      expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
     res.status(200).json({
       message: "User Logged In. Token Generated",
       token,
       user: { id: user._id, username: user.username },
+    });
+  } catch (error) {
+    console.log("User Login Error:", error);
+    res.status(500).send("Server Error");
+  }
+});
+
+//Fetch logged in user details - GET /api/auth/me
+router.get("/me", userAuth, async (req, res) => {
+  try {
+    res.status(200).json({
+      fullName: req.user.fullName,
+      username: req.user.username,
+      email: req.user.email,
     });
   } catch (error) {
     console.log("User Login Error:", error);

@@ -93,7 +93,7 @@ router.get("/me", userAuth, async (req, res) => {
       email: req.user.email,
     });
   } catch (error) {
-    console.log("User Login Error:", error);
+    console.log("User Fetch Error:", error);
     res.status(500).send("Server Error");
   }
 });

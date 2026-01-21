@@ -10,7 +10,7 @@ const userAuth = async (req, res, next) => {
 
     const decodedObj = jwt.verify(token, process.env.JWT_SECRET); // Synchronous Operation.
     const { userId } = decodedObj;
-    const responseUser = await User.findById(userId);
+    const responseUser = await User.findById(userId).select("-password");
     if (!responseUser) throw new Error("User Not Found.");
     req.user = responseUser;
     next();

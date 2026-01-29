@@ -13,7 +13,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const corsOption = {
-  origin: "*",
+  //   origin: "*", // this will not work if the request includes credentials(e.g cookies)
+  origin: "http://localhost:3000",
   credentials: true,
   optionSuccessStatus: 200,
 };

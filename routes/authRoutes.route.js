@@ -12,7 +12,7 @@ const User = require("../models/user.model");
 
 //User Registration - POST /api/auth/register
 router.post("/register", async (req, res) => {
-  const { username, email, password } = req.body;
+  const { fullName, username, email, password } = req.body;
   try {
     let user = await User.find({ email: email });
     if (user._id)
@@ -21,7 +21,7 @@ router.post("/register", async (req, res) => {
     //hashing the password
     const salt = bcrypt.genSaltSync(10);
     const hash = bcrypt.hashSync(password, salt);
-    user = new User({ username, email, password: hash });
+    user = new User({ fullName, username, email, password: hash });
     const userResponse = await user.save();
     if (!userResponse)
       return res
@@ -96,6 +96,15 @@ router.get("/me", userAuth, async (req, res) => {
     console.log("User Fetch Error:", error);
     res.status(500).send("Server Error");
   }
+});
+
+//Logout the user
+router.post("/logout", async (req, res) => {
+  res.cookie("token", "", {
+    httpOnly: true,
+    expires: new Date(0),
+  });
+  res.status(200).send("Logout Success.");
 });
 
 module.exports = router;

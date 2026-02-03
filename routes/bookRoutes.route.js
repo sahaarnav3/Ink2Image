@@ -73,7 +73,7 @@ router.post(
         {
           upsert: true,
           new: true,
-        }
+        },
       );
 
       res.status(201).json({
@@ -91,8 +91,60 @@ router.post(
         error: error.message,
       });
     }
-  }
+  },
 );
+
+//Route to generate book cover
+router.post("/:id/generate-cover", userAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Fetch the book data from MongoDB
+    const book = await Book.findById(id);
+    if (!book) return res.status(404).json({ message: "Book not found" });
+
+    //Getting first 10 pages
+    const pages = await Page.find({ bookId: id })
+      .sort({ pageNumber: 1 })
+      .limit(10);
+    if (!pages || pages.length === 0)
+      return res.status(404).json({ message: "Book pages not found" });
+    //Combine text
+    const textSnippet = pages.map((p) => p.content).join("\n\n");
+
+    // 2. Book Cover Image Generation
+    const sheetPrompt = `
+      Role: Professional High-End Book Cover Illustrator.
+      Source Text (First 10 Pages): "${textSnippet}"
+      
+      TASK: Generate a visually stunning, cinematic landscape or abstract scenery that represents the world of this book.
+      
+      STRICTURES:
+      1. NO HUMANS: Do not include any people, faces, or characters.
+      2. COLOR PALETTE: Be bold and vibrant. Use a rich, varied color scheme inspired by the mood of the text (e.g., celestial golds, deep cosmic purples, lush forest greens).
+      3. COMPOSITION: Focus on landscapes, architecture, or symbolic abstract elements mentioned in the text.
+      4. STYLE: High-fidelity, 3D render or cinematic digital art style. Portrait 2:3 aspect ratio. No text.
+    `;
+    const sheetUrl = await generateAndUploadImage(
+      sheetPrompt,
+      id,
+      "character_sheet",
+    );
+    console.log("\nBook Cover Image Generated and Uploaded.");
+    book.coverImage = sheetUrl;
+    await book.save();
+    res.status(200).json({
+      message: "Cover generated successfully",
+      coverImage: sheetUrl,
+    });
+  } catch (error) {
+    console.log("\n❌ Error in Generating Book Cover:", error);
+    res.status(500).json({
+      message: "Book Cover Generation Failed",
+      error: error.message,
+    });
+  }
+});
 
 //Route to analyze and generate artStyle, characters and setting.
 router.post("/:id/analyze", userAuth, async (req, res) => {
@@ -122,7 +174,7 @@ router.post("/:id/analyze", userAuth, async (req, res) => {
     const sheetUrl = await generateAndUploadImage(
       sheetPrompt,
       id,
-      "character_sheet"
+      "character_sheet",
     );
     console.log("\nCharacter Sheet Image Generated and Uploaded.");
 
@@ -137,7 +189,7 @@ router.post("/:id/analyze", userAuth, async (req, res) => {
         },
         characterSheetUrl: sheetUrl,
       },
-      { new: true }
+      { new: true },
     );
 
     res.status(201).json({
@@ -155,7 +207,7 @@ router.post("/:id/generate-prompts", userAuth, async (req, res) => {
   try {
     const { id } = req.params;
     console.log(
-      `\n--- Starting Step 6: Image Prompt Generation for Book ${id} ---`
+      `\n--- Starting Step 6: Image Prompt Generation for Book ${id} ---`,
     );
 
     //1. GET DATA
@@ -169,7 +221,7 @@ router.post("/:id/generate-prompts", userAuth, async (req, res) => {
 
     console.log(
       `\n Found ${pages.length} pages. Using style guide:`,
-      book.globalContext.artStyle
+      book.globalContext.artStyle,
     );
 
     //2. Setting up Loop Variables
@@ -189,7 +241,7 @@ router.post("/:id/generate-prompts", userAuth, async (req, res) => {
       const newPrompt = await generatePagePrompt(
         book.globalContext,
         page.content,
-        previousPageSummary
+        previousPageSummary,
       );
 
       page.imagePrompt = newPrompt;
@@ -231,7 +283,7 @@ router.post("/:id/generate-images", userAuth, async (req, res) => {
     const book = await Book.findById(req.params.id);
     console.log("\n🚀 Starting Pass 3: Image Generation for Book", id, "---");
     console.log(
-      `\n---🚀 Generating Image Buffer: Pages ${startPage} to ${endPage} --- `
+      `\n---🚀 Generating Image Buffer: Pages ${startPage} to ${endPage} --- `,
     );
 
     //Fetch pages which have prompts but NO images
@@ -251,7 +303,7 @@ router.post("/:id/generate-images", userAuth, async (req, res) => {
     for (const page of pages) {
       if (page.imageUrl) {
         console.log(
-          `\n🎨 Image already exists for Page: ${page.pageNumber}... Moving onto next page.`
+          `\n🎨 Image already exists for Page: ${page.pageNumber}... Moving onto next page.`,
         );
         continue;
       }
@@ -262,7 +314,7 @@ router.post("/:id/generate-images", userAuth, async (req, res) => {
           page.imagePrompt,
           id,
           `page_${page.pageNumber}`,
-          book.characterSheetUrl
+          book.characterSheetUrl,
         );
         page.imageUrl = driveUrl;
         page.status = "completed";
@@ -272,7 +324,7 @@ router.post("/:id/generate-images", userAuth, async (req, res) => {
 
         //Rate Limit: 7 second for Image API Health
         console.log(
-          "\n🖼️ Image Generated & Uploaded. Waiting 7 second before generating next."
+          "\n🖼️ Image Generated & Uploaded. Waiting 7 second before generating next.",
         );
         await new Promise((resolve) => setTimeout(resolve, 7000));
       } catch (error) {
@@ -302,11 +354,11 @@ router.post("/:id/generate-images", userAuth, async (req, res) => {
 router.get("/my-library", userAuth, async (req, res) => {
   try {
     // Find all books in THIS user's library and pull the Book details
-        const userBooks = await UserLibrary.find({ userId: req.user._id })
-            .populate('bookId') // This merges the Book metadata into the result
-            .sort({ addedAt: -1 });
+    const userBooks = await UserLibrary.find({ userId: req.user._id })
+      .populate("bookId") // This merges the Book metadata into the result
+      .sort({ addedAt: -1 });
 
-        res.json(userBooks);
+    res.json(userBooks);
   } catch (error) {
     res.status(500).json({ message: "Server Error" });
   }

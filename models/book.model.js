@@ -5,6 +5,10 @@ const BookSchema = new mongoose.Schema(
     title: { type: String, required: true },
     author: { type: String },
     originalFilePath: { type: String, required: true }, // Path to the uploaded file
+    coverImage: {
+      type: String,
+      default: "https://images.unsplash.com/photo-1532012197267-da84d127e765?q=80&w=800",
+    },
 
     //Below is for the style guide (context of the characters)
     globalContext: {
@@ -22,7 +26,7 @@ const BookSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 module.exports = mongoose.model("Book", BookSchema);

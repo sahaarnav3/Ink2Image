@@ -34,6 +34,7 @@ router.post(
       const newBook = new Book({
         title: req.body.title || req.file.originalname,
         originalFilePath: req.file.path,
+        status: "Draft",
       });
 
       const savedBook = await newBook.save();
@@ -128,10 +129,11 @@ router.post("/:id/generate-cover", userAuth, async (req, res) => {
     const sheetUrl = await generateAndUploadImage(
       sheetPrompt,
       id,
-      "character_sheet",
+      "book_cover",
     );
     console.log("\nBook Cover Image Generated and Uploaded.");
     book.coverImage = sheetUrl;
+    book.status = "Processing";
     await book.save();
     res.status(200).json({
       message: "Cover generated successfully",
@@ -260,6 +262,8 @@ router.post("/:id/generate-prompts", userAuth, async (req, res) => {
     }
 
     console.log("\n--- Loop Complete ---");
+    book.status = "Completed";
+    await book.save();
     res.status(201).json({
       message: "Successfully generated image prompts for all pages.",
       totalPages: pages.length,
@@ -355,11 +359,15 @@ router.get("/my-library", userAuth, async (req, res) => {
   try {
     // Find all books in THIS user's library and pull the Book details
     const userBooks = await UserLibrary.find({ userId: req.user._id })
-      .populate("bookId") // This merges the Book metadata into the result
+      .populate({
+        path: "bookId",
+        select: "_id title totalPages status coverImage"
+      }) 
       .sort({ addedAt: -1 });
 
     res.json(userBooks);
   } catch (error) {
+    console.log("library Error", error);
     res.status(500).json({ message: "Server Error" });
   }
 });

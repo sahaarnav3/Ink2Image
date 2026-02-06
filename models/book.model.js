@@ -7,7 +7,13 @@ const BookSchema = new mongoose.Schema(
     originalFilePath: { type: String, required: true }, // Path to the uploaded file
     coverImage: {
       type: String,
-      default: "https://images.unsplash.com/photo-1532012197267-da84d127e765?q=80&w=800",
+      default:
+        "https://images.unsplash.com/photo-1532012197267-da84d127e765?q=80&w=800",
+    },
+    status: {
+      type: String,
+      enum: ["Processing", "Completed", "Draft"],
+      default: "Draft",
     },
 
     //Below is for the style guide (context of the characters)

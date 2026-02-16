@@ -12,9 +12,18 @@ const BookSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["Processing", "Completed", "Draft"],
-      default: "Draft",
+      enum: [
+        "Uploaded",
+        "Shredding",
+        "Generating_Cover",
+        "Analyzing",
+        "Generating_Prompts",
+        "Completed",
+        "Error",
+      ],
+      default: "Uploaded",
     },
+    progress: { type: Number, default: 0 },
 
     //Below is for the style guide (context of the characters)
     globalContext: {

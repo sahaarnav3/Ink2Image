@@ -3,6 +3,7 @@ const router = express.Router();
 
 //Importing controller and middlewares
 const bookController = require("../controllers/bookController.js");
+const orchestrator = require("../controllers/orchestrator.js");
 const { upload } = require("../middlewares/multer.middleware");
 const { userAuth } = require("../middlewares/userAuth.js");
 
@@ -17,5 +18,8 @@ router.post("/:id/generate-prompts", userAuth, bookController.generateImagePromp
 router.post("/:id/generate-images", userAuth, bookController.generateActualImages);
 
 router.get("/my-library", userAuth, bookController.fetchLibrary);
+
+router.post("/start-pipeline", upload.single("bookFile"), userAuth, orchestrator.startNeuralPipeline);
+router.get("/ping-socket/:bookId", userAuth, orchestrator.pingSocket);
 
 module.exports = router;

@@ -13,16 +13,12 @@ const {
 } = require("../utils/aiService");
 const { generateAndUploadImage } = require("../utils/imageService");
 
-/**
- * HELPER: Syncs progress to MongoDB and emits real-time updates via Socket.io
- * @param {string} bookId - The ID of the book being processed
- * @param {string} status - Current pipeline status (Enum)
- * @param {number} progress - Numeric percentage (0-100)
- * @param {object} io - The Socket.io instance
- */
+// HELPER: Syncs progress to MongoDB and emits real-time updates via Socket.io
 const syncPipeline = async (bookId, status, progress, io) => {
   try {
-    await Book.findByIdAndUpdate(bookId, { status, progress });
+    if (status == "Error") await Book.findByIdAndUpdate(bookId, { status });
+    else await Book.findByIdAndUpdate(bookId, { status, progress });
+
     if (io) {
       io.to(bookId.toString()).emit("pipeline_update", { status, progress });
     }
@@ -35,49 +31,102 @@ const syncPipeline = async (bookId, status, progress, io) => {
 //MAIN CONTROLLER: Orchestrates the Multi-Pass Visualization Pipeline
 module.exports.startNeuralPipeline = async (req, res) => {
   const { io } = req;
+  let bookId;
+  let isResuming = false;
+
   try {
-    if (!req.file) throw new Error("Book Not Uploaded");
+    console.log("Strating PIpeline");
+    if (!req.file) throw new Error("No file provided for new book.");
+    const titleToCheck =
+      req.body.title || (req.file ? req.file.originalname : null);
+
+    // --- 🔍 STEP 1: SMART DETECTION ---
+    // Find ANY book with this title/user (Active OR Error)
+    const existingBook = await Book.findOne({
+      title: titleToCheck,
+    }).sort({ createdAt: -1 });
 
     // --- 🛡️ THE SAFETY CHECK ---
     // Check if specific user already has a book currently processing.
     // To prevents "Double-Triggering" if they refresh and re-upload quickly.
-    const activeBook = await Book.findOne({
-      title: req.body.title || req.file.originalName,
-      status: {
-        $in: [
+    if (existingBook) {
+      // CASE A: Already Completed -> Return immediately
+      if (
+        existingBook.status === "Completed" ||
+        existingBook.progress === 100
+      ) {
+        console.log(
+          `\n✅ Book already processed: ${existingBook.title}. Redirecting...`,
+        );
+        return res.status(200).json({
+          message: "Book already in library.",
+          bookId: existingBook._id,
+          status: "Completed",
+          progress: 100,
+          redirect: true, // Flag for frontend to redirect to /library
+        });
+      }
+      // CASE B: It's already running -> Just connect
+      if (
+        [
           "Analyzing",
           "Shredding",
           "Generating_Cover",
           "Generating_Prompts",
-          "Uploaded",
-        ],
-      },
-    });
-    if (activeBook) {
-      console.log(
-        `\n⚠️ Pipeline already active for: ${activeBook.title}. Re-linking...`,
-      );
-      return res.status(200).json({
-        message:
-          "Pipeline already active for this book. Connecting to existing stream...",
-        bookId: activeBook._id,
-        status: activeBook.status,
-        progress: activeBook.progress,
-      });
+        ].includes(existingBook.status)
+      ) {
+        console.log(
+          `\n⚠️ Pipeline active for: ${existingBook.title}. Re-linking...`,
+        );
+        return res.status(200).json({
+          message: "Pipeline active. Connecting to stream...",
+          bookId: existingBook._id,
+          status: existingBook.status,
+          progress: existingBook.progress,
+        });
+      }
+
+      // CASE C: It failed or is incomplete -> RESUME IT
+      if (
+        existingBook.status === "Error" ||
+        existingBook.status === "Uploaded" ||
+        existingBook.progress < 100
+      ) {
+        console.log(
+          `\n🔄 Resuming Failed/Incomplete Book: ${existingBook.title}`,
+        );
+        bookId = existingBook._id;
+        isResuming = true;
+
+        // Reset status to "Resuming" so UI knows something is happening
+        await syncPipeline(bookId, "Resuming", existingBook.progress, io);
+      }
     }
 
-    // --- PART 1: INITIAL UPLOAD & DB CREATION ---
-    const bookId = await uploadBook(req);
+    // --- 🛠️ STEP 2: HANDLE CREATION (Only if NOT resuming) ---
+    if (!isResuming) {
+      // --- PART 1: INITIAL UPLOAD & DB CREATION ---
+      bookId = await uploadBook(req);
+      // --- PART 2: SEGREGATING THE PDF INTO PAGES ---
+      await segrateBookIntoPages(bookId, io);
+    } else {
+      // If resuming, check if we missed the shredding phase previously
+      const bookToCheck = await Book.findById(bookId);
+      if (bookToCheck.totalPages === 0 && req.file) {
+        // It failed BEFORE shredding finished, so we must retry shredding
+        await segrateBookIntoPages(bookId, io);
+      }
+    }
 
-    // --- PART 2: SEGREGATING THE PDF INTO PAGES ---
-    await segrateBookIntoPages(bookId, io);
+    // --- 🚀 STEP 3: LAUNCH PIPELINE ---
     res.status(202).json({
-      message: "Upload Successful. Neural Pipeline Initiated.",
+      message: isResuming
+        ? "Pipeline Resumed"
+        : "Upload Successful. Neural Pipeline Initiated.",
       bookId,
     });
 
-    // --- PART 3: THE ASYNCHRONOUS AI PIPELINE (Background) ---
-
+    // --- PART 4: THE ASYNCHRONOUS AI PIPELINE (Background) ---
     (async () => {
       try {
         console.log(`\n--- 🚀 Starting Background Pipeline for: ${bookId} ---`);
@@ -168,6 +217,13 @@ const segrateBookIntoPages = async (bookId, io) => {
 
 //Function for generating Book Cover
 const generateBookCover = async (bookId, startPage = 1) => {
+  //Checking if book already has a cover url
+  const bookResponse = await Book.findById(bookId);
+  if (!bookResponse.coverImage.includes("unsplash")) {
+    console.log("Cover image already generated. Skipping.");
+    return;
+  }
+
   //Getting first 10 pages
   const pages = await Page.find({ bookId })
     .sort({ pageNumber: startPage })
@@ -202,6 +258,17 @@ const generateBookCover = async (bookId, startPage = 1) => {
 
 //Function to analyze characters and scene
 const analyzeBook = async (bookId) => {
+  //Checking if book already has a cover url
+  const bookResponse = await Book.findById(bookId);
+  if (
+    bookResponse?.author &&
+    bookResponse?.globalContext &&
+    bookResponse?.characterSheetUrl
+  ) {
+    console.log("Analysis already complete. Skipping.");
+    return;
+  }
+
   //Getting first n page (change limit value to get n number of pages)(to get a rough global context for art style)
   const pages = await Page.find({ bookId }).sort({ pageNumber: 1 }).limit(10);
   if (!pages || pages.length === 0) throw new Error("Book pages not found");
@@ -238,7 +305,6 @@ const analyzeBook = async (bookId) => {
 
 //Function to generate image prompts for all the pages
 const generateImagePrompts = async (bookId) => {
-  //1. GET DATA
   const book = await Book.findById(bookId);
   //Prompting is done for 1st 10 pages only
   const pages = await Page.find({ bookId, pageNumber: { $lte: 10 } }).sort({
@@ -281,16 +347,19 @@ const generateImagePrompts = async (bookId) => {
 //Instead of batch processing (creating pages of all pages at once) I am doing On-demand buffering.
 // body - { startPage, endPage }
 const generateActualImages = async (bookId) => {
-  const book = await Book.findById(req.params.id);
+  const book = await Book.findById(bookId);
 
   //Fetch pages which have prompts but NO images
   const pages = await Page.find({
-    bookId: id,
+    bookId: bookId,
     pageNumber: { $gte: 1, $lte: 10 },
     imagePrompt: { $exists: true, $ne: "" }, // image exists and !== ""
   }).sort({ pageNumber: 1 });
 
-  if (pages.length === 0) throw new Error("No pending images to generate.");
+  if (pages.length === 0) {
+    console.log("No pending images found. Skipping generation.");
+    return;
+  }
 
   for (const page of pages) {
     if (page.imageUrl) continue;
@@ -308,4 +377,43 @@ const generateActualImages = async (bookId) => {
     //Rate Limit: 7 second for Image API Health
     await new Promise((resolve) => setTimeout(resolve, 7000));
   }
+};
+
+// Websocket tester.
+module.exports.pingSocket = async (req, res) => {
+  const { bookId } = req.params;
+  const {io} = req // Ensure io is attached in server.js
+
+  if (!io) {
+    return res.status(500).json({ error: "Socket server not found on app." });
+  }
+
+  console.log(`\n📡 Starting Mock Pinger for Room: ${bookId}`);
+
+  // 1. Immediate response to Postman
+  res.status(200).json({ message: `Pinger started for room ${bookId}` });
+
+  // 2. Start the Loop
+  let count = 1;
+  const interval = setInterval(() => {
+    if (count > 5) {
+      clearInterval(interval);
+      console.log(`🏁 Mock Pinger finished for: ${bookId}`);
+      return;
+    }
+
+    const mockStatus = ["Analyzing", "Generating_Cover", "Shredding", "Finalizing"][count % 4];
+    const mockProgress = count * 20;
+
+    console.log(`📤 Pinging Room ${bookId}: Step ${count}`);
+
+    // The Critical Emit
+    io.to(bookId.toString()).emit("pipeline_update", {
+      status: `Mock_${mockStatus}`,
+      progress: mockProgress,
+      isTest: true
+    });
+
+    count++;
+  }, 3000); // 3-second delay
 };

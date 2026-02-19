@@ -15,8 +15,8 @@ const BookSchema = new mongoose.Schema(
       enum: [
         "Uploaded",
         "Shredding",
-        "Generating_Cover",
         "Analyzing",
+        "Generating_Cover",
         "Generating_Prompts",
         "Completed",
         "Error",

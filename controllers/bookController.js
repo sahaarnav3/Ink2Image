@@ -89,43 +89,76 @@ module.exports.generateBookCover = async (req, res) => {
     const { id } = req.params;
 
     // 1. Fetch the book data from MongoDB
-    const book = await Book.findById(id);
-    if (!book) return res.status(404).json({ message: "Book not found" });
+    const bookResponse = await Book.findById(id);
+    if (!bookResponse)
+      return res.status(404).json({ message: "Book not found" });
+
+    if (!bookResponse.globalContext || !bookResponse.globalContext.setting) {
+      throw new Error("Global context missing. Run analyzeBook first.");
+    }
+
+    const { setting, artStyle } = bookResponse.globalContext;
 
     //Getting first 10 pages
-    const pages = await Page.find({ bookId: id })
-      .sort({ pageNumber: 1 })
-      .limit(10);
-    if (!pages || pages.length === 0)
-      return res.status(404).json({ message: "Book pages not found" });
-    //Combine text
-    const textSnippet = pages.map((p) => p.content).join("\n\n");
+    // const pages = await Page.find({ bookId: id })
+    //   .sort({ pageNumber: 1 })
+    //   .limit(10);
+    // if (!pages || pages.length === 0)
+    //   return res.status(404).json({ message: "Book pages not found" });
+    // //Combine text
+    // const textSnippet = pages.map((p) => p.content).join("\n\n");
 
-    // 2. Book Cover Image Generation
-    const sheetPrompt = `
-      Role: Professional High-End Book Cover Illustrator.
-      Source Text (First 10 Pages): "${textSnippet}"
+    // // 2. Book Cover Image Generation
+    // const sheetPrompt = `
+    //   Role: Professional High-End Book Cover Illustrator.
+    //   Source Text (First 10 Pages): "${textSnippet}"
+
+    //   TASK: Generate a visually stunning, cinematic landscape or abstract scenery that represents the world of this book.
+
+    //   STRICTURES:
+    //   1. NO HUMANS: Do not include any people, faces, or characters.
+    //   2. COLOR PALETTE: Be bold and vibrant. Use a rich, varied color scheme inspired by the mood of the text (e.g., celestial golds, deep cosmic purples, lush forest greens).
+    //   3. COMPOSITION: Focus on landscapes, architecture, or symbolic abstract elements mentioned in the text.
+    //   4. STYLE: High-fidelity, 3D render or cinematic digital art style. Portrait 2:3 aspect ratio. No text.
+    // `;
+    const coverPrompt = `
+      Role: Professional High-End Book Cover Designer & Illustrator.
+    
+      CONTEXT:
+      - Title: "${bookResponse.title}"
+      - Extracted Setting: ${setting}
+      - Extracted Art Style: ${artStyle}
       
-      TASK: Generate a visually stunning, cinematic landscape or abstract scenery that represents the world of this book.
+      TASK: 
+      1. RESEARCH: Use your internal knowledge of the book "${bookResponse.title}" to identify its core themes, iconic locations, or symbolic objects.
+      2. SYNTHESIZE: Combine those iconic themes with the extracted setting (${setting}) and visual style (${artStyle}).
+      3. COMPOSITION: Create a "Focal Point" design. This should not be a random abstract image. It must feature a clear, centered, or dynamically placed subject (e.g., a specific landmark, a symbolic artifact, or an iconic portal) that anchors the world.
+      
+      STYLE SPECIFICATIONS:
+      - HYBRID AESTHETIC: Strike a balance between "Cinematic Concept Art" and a "Formal Book Cover." 
+      - LIGHTING: Use high-contrast "Rim Lighting" and atmospheric depth (fog, embers, or light beams) to make the subject pop.
+      - QUALITY: High-fidelity, 3D render feel, rich textures, and professional color grading.
       
       STRICTURES:
-      1. NO HUMANS: Do not include any people, faces, or characters.
-      2. COLOR PALETTE: Be bold and vibrant. Use a rich, varied color scheme inspired by the mood of the text (e.g., celestial golds, deep cosmic purples, lush forest greens).
-      3. COMPOSITION: Focus on landscapes, architecture, or symbolic abstract elements mentioned in the text.
-      4. STYLE: High-fidelity, 3D render or cinematic digital art style. Portrait 2:3 aspect ratio. No text.
+      1. NO HUMANS: Landscapes, architecture, or symbolic objects only. Focus on the "Soul of the World."
+      2. NO TEXT: Do not include the title, author name, or any typography on the image.
+      3. COMPOSITION: Portrait 3:4 aspect ratio.
     `;
-    const sheetUrl = await generateAndUploadImage(
-      sheetPrompt,
+
+    const coverUrl = await generateAndUploadImage(
+      coverPrompt,
       id,
       "book_cover",
     );
     console.log("\nBook Cover Image Generated and Uploaded.");
-    book.coverImage = sheetUrl;
-    book.status = "Processing";
-    await book.save();
+
+    await Book.findByIdAndUpdate(id, {
+      coverImage: coverUrl,
+      status: "Generating_Cover",
+    });
     res.status(200).json({
       message: "Cover generated successfully",
-      coverImage: sheetUrl,
+      coverImage: coverUrl,
     });
   } catch (error) {
     console.log("\n❌ Error in Generating Book Cover:", error);
@@ -143,14 +176,27 @@ module.exports.analyzeBook = async (req, res) => {
     console.log(`\n--- Starting Prompt Generation Loop for Book ID: ${id} ---`);
 
     //Getting first n page (change limit value to get n number of pages)(to get a rough global context for art style)
-    const pages = await Page.find({ bookId: id })
-      .sort({ pageNumber: 1 })
-      .limit(10);
-    if (!pages || pages.length === 0)
-      return res.status(404).json({ message: "Book pages not found" });
+    const pages = await Page.find({ bookId }).sort({ pageNumber: 1 }).limit(40);
+    if (!pages || pages.length === 0) throw new Error("Book pages not found");
+
+    //Filtering out the pages that look like fluff matter
+    const storyPages = pages.filter((page) => {
+      const text = page.content.toLowerCase();
+      const isFrontMatter =
+        text.includes("table of contents") ||
+        text.includes("copyright") ||
+        text.includes("all rights reserved") ||
+        text.includes("dedicated to") ||
+        text.includes("acknowledgments") ||
+        text.length < 250;
+      return !isFrontMatter;
+    });
 
     //Combine text
-    const textSnippet = pages.map((p) => p.content).join("\n\n");
+    const textSnippet = storyPages
+      .slice(0, 20)
+      .map((p) => p.content)
+      .join("\n\n");
     // console.log(`\n⬆️ Sending ${textSnippet.length} characters to Gemini...`);
 
     //Calling Gemini

@@ -140,13 +140,13 @@ module.exports.startNeuralPipeline = async (req, res) => {
       try {
         console.log(`\n--- 🚀 Starting Background Pipeline for: ${bookId} ---`);
 
-        // Phase 1: Book Cover
-        await syncPipeline(bookId, "Generating_Cover", 25, io);
-        await generateBookCover(bookId, 1);
-
-        // Phase 2: Analysis & Character Sheet
-        await syncPipeline(bookId, "Analyzing", 50, io);
+        // Phase 1: Analysis & Character Sheet
+        await syncPipeline(bookId, "Analyzing", 35, io);
         await analyzeBook(bookId);
+
+        // Phase 2: Book Cover
+        await syncPipeline(bookId, "Generating_Cover", 50, io);
+        await generateBookCover(bookId, 1);
 
         // Phase 3: Prompt Generation (Free Tier: 1-10)
         await syncPipeline(bookId, "Generating_Prompts", 75, io);
@@ -233,34 +233,65 @@ const generateBookCover = async (bookId, startPage = 1) => {
     return;
   }
 
+  if (!bookResponse.globalContext || !bookResponse.globalContext.setting) {
+    throw new Error("Global context missing. Run analyzeBook first.");
+  }
+
+  const { setting, artStyle } = bookResponse.globalContext;
+
   //Getting first 10 pages
-  const pages = await Page.find({ bookId })
-    .sort({ pageNumber: startPage })
-    .limit(10);
-  if (!pages || pages.length === 0)
-    throw new Error("Pages not found for cover.");
+  //   const pages = await Page.find({ bookId })
+  //     .sort({ pageNumber: startPage })
+  //     .limit(10);
+  //   if (!pages || pages.length === 0)
+  //     throw new Error("Pages not found for cover.");
 
   //Combine text
-  const textSnippet = pages.map((p) => p.content).join("\n\n");
-  const sheetPrompt = `
-          Role: Professional High-End Book Cover Illustrator.
-          Source Text (First 10 Pages): "${textSnippet}"
-          
-          TASK: Generate a visually stunning, cinematic landscape or abstract scenery that represents the world of this book.
-          
-          STRICTURES:
-          1. NO HUMANS: Do not include any people, faces, or characters.
-          2. COLOR PALETTE: Be bold and vibrant. Use a rich, varied color scheme inspired by the mood of the text (e.g., celestial golds, deep cosmic purples, lush forest greens).
-          3. COMPOSITION: Focus on landscapes, architecture, or symbolic abstract elements mentioned in the text.
-          4. STYLE: High-fidelity, 3D render or cinematic digital art style. Portrait 2:3 aspect ratio. No text.
-        `;
-  const sheetUrl = await generateAndUploadImage(
-    sheetPrompt,
+  //   const textSnippet = pages.map((p) => p.content).join("\n\n");
+  //   const sheetPrompt = `
+  //           Role: Professional High-End Book Cover Illustrator.
+  //           Source Text (First 10 Pages): "${textSnippet}"
+
+  //           TASK: Generate a visually stunning, cinematic landscape or abstract scenery that represents the world of this book.
+
+  //           STRICTURES:
+  //           1. NO HUMANS: Do not include any people, faces, or characters.
+  //           2. COLOR PALETTE: Be bold and vibrant. Use a rich, varied color scheme inspired by the mood of the text (e.g., celestial golds, deep cosmic purples, lush forest greens).
+  //           3. COMPOSITION: Focus on landscapes, architecture, or symbolic abstract elements mentioned in the text.
+  //           4. STYLE: High-fidelity, 3D render or cinematic digital art style. Portrait 2:3 aspect ratio. No text.
+  //         `;
+
+  const coverPrompt = `
+    Role: Professional High-End Book Cover Designer & Illustrator.
+  
+    CONTEXT:
+    - Title: "${bookResponse.title}"
+    - Extracted Setting: ${setting}
+    - Extracted Art Style: ${artStyle}
+    
+    TASK: 
+    1. RESEARCH: Use your internal knowledge of the book "${bookResponse.title}" to identify its core themes, iconic locations, or symbolic objects.
+    2. SYNTHESIZE: Combine those iconic themes with the extracted setting (${setting}) and visual style (${artStyle}).
+    3. COMPOSITION: Create a "Focal Point" design. This should not be a random abstract image. It must feature a clear, centered, or dynamically placed subject (e.g., a specific landmark, a symbolic artifact, or an iconic portal) that anchors the world.
+    
+    STYLE SPECIFICATIONS:
+    - HYBRID AESTHETIC: Strike a balance between "Cinematic Concept Art" and a "Formal Book Cover." 
+    - LIGHTING: Use high-contrast "Rim Lighting" and atmospheric depth (fog, embers, or light beams) to make the subject pop.
+    - QUALITY: High-fidelity, 3D render feel, rich textures, and professional color grading.
+    
+    STRICTURES:
+    1. NO HUMANS: Landscapes, architecture, or symbolic objects only. Focus on the "Soul of the World."
+    2. NO TEXT: Do not include the title, author name, or any typography on the image.
+    3. COMPOSITION: Portrait 3:4 aspect ratio.
+  `;
+
+  const coverUrl = await generateAndUploadImage(
+    coverPrompt,
     bookId,
     "book_cover",
   );
   await Book.findByIdAndUpdate(bookId, {
-    coverImage: sheetUrl,
+    coverImage: coverUrl,
     status: "Generating_Cover",
   });
 };
@@ -279,11 +310,25 @@ const analyzeBook = async (bookId) => {
   }
 
   //Getting first n page (change limit value to get n number of pages)(to get a rough global context for art style)
-  const pages = await Page.find({ bookId }).sort({ pageNumber: 1 }).limit(10);
+  const pages = await Page.find({ bookId }).sort({ pageNumber: 1 }).limit(40);
   if (!pages || pages.length === 0) throw new Error("Book pages not found");
 
+  //Filtering out the pages that look like fluff matter
+  const storyPages = pages.filter((page) => {
+    const text = page.content.toLowerCase();
+    const isFrontMatter =
+      text.includes("table of contents") ||
+      text.includes("copyright") ||
+      text.includes("all rights reserved");
+    text.length < 200;
+    return !isFrontMatter;
+  });
+
   //Combine text
-  const textSnippet = pages.map((p) => p.content).join("\n\n");
+  const textSnippet = storyPages
+    .slice(0, 20)
+    .map((p) => p.content)
+    .join("\n\n");
 
   //Calling Gemini
   const styleGuide = await analyzeBookContext(textSnippet);

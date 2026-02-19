@@ -41,8 +41,17 @@ module.exports.startNeuralPipeline = async (req, res) => {
       req.body.title || (req.file ? req.file.originalname : null);
 
     // --- 🔍 STEP 1: SMART DETECTION ---
-    // Find ANY book with this title/user (Active OR Error)
+    //Fetch all books for the logged in user.
+    const userLibraryEntries = await UserLibrary.find({
+      userId: req.user._id,
+    }).select("bookId");
+
+    //Extracting just the bookIds (forming array)
+    const userBookIds = userLibraryEntries.map((entry) => entry.bookId);
+
+    // Find ANY book that matches the title and belongs from the list above
     const existingBook = await Book.findOne({
+      _id: { $in: userBookIds },
       title: titleToCheck,
     }).sort({ createdAt: -1 });
 
@@ -382,7 +391,7 @@ const generateActualImages = async (bookId) => {
 // Websocket tester.
 module.exports.pingSocket = async (req, res) => {
   const { bookId } = req.params;
-  const {io} = req // Ensure io is attached in server.js
+  const { io } = req; // Ensure io is attached in server.js
 
   if (!io) {
     return res.status(500).json({ error: "Socket server not found on app." });
@@ -402,7 +411,12 @@ module.exports.pingSocket = async (req, res) => {
       return;
     }
 
-    const mockStatus = ["Analyzing", "Generating_Cover", "Shredding", "Finalizing"][count % 4];
+    const mockStatus = [
+      "Analyzing",
+      "Generating_Cover",
+      "Shredding",
+      "Finalizing",
+    ][count % 4];
     const mockProgress = count * 20;
 
     console.log(`📤 Pinging Room ${bookId}: Step ${count}`);
@@ -411,7 +425,7 @@ module.exports.pingSocket = async (req, res) => {
     io.to(bookId.toString()).emit("pipeline_update", {
       status: `Mock_${mockStatus}`,
       progress: mockProgress,
-      isTest: true
+      isTest: true,
     });
 
     count++;

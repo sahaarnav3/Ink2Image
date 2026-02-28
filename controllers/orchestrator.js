@@ -440,6 +440,39 @@ const generateActualImages = async (bookId) => {
   }
 };
 
+// To check if any book is already being processed.
+module.exports.getActiveSession = async (req, res) => {
+  try {
+
+    const userLibraryEntries = await UserLibrary.find({ userId: req.user._id }).select("bookId");
+    const userBookIds = userLibraryEntries.map(entry => entry.bookId);
+
+    // 2. Find any book that is NOT completed or errored out
+    const activeBook = await Book.findOne({
+      _id: { $in: userBookIds },
+      status: { $nin: ["Completed", "Error"] },
+      progress: { $lt: 100 }
+    }).sort({ updatedAt: -1 });
+
+    if (!activeBook) {
+      return res.status(200).json({ active: false });
+    }
+
+    // 3. Return the active state
+    return res.status(200).json({
+      active: true,
+      bookId: activeBook._id,
+      status: activeBook.status,
+      progress: activeBook.progress,
+      title: activeBook.title
+    });
+
+  } catch (error) {
+    console.error("Session Check Error:", error);
+    return res.status(500).json({ message: "Failed to check active sessions" });
+  }
+};
+
 // Websocket tester.
 module.exports.pingSocket = async (req, res) => {
   const { bookId } = req.params;

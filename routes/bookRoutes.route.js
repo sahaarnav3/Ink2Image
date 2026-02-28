@@ -20,6 +20,9 @@ router.post("/:id/generate-images", userAuth, bookController.generateActualImage
 router.get("/my-library", userAuth, bookController.fetchLibrary);
 
 router.post("/start-pipeline", upload.single("bookFile"), userAuth, orchestrator.startNeuralPipeline);
+
+router.get("/check-active-session", userAuth, orchestrator.getActiveSession);
+
 router.get("/ping-socket/:bookId", userAuth, orchestrator.pingSocket);
 
 module.exports = router;

@@ -6,6 +6,7 @@ const PageSchema = new mongoose.Schema({
   content: { type: String, required: true }, // Raw Text
 
   //Below are AI generated fields for 2nd Stage
+  pageSummary: {type: String},
   imagePrompt: { type: String },
   imageUrl: { type: String },
   status: {

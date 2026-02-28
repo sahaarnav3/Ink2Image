@@ -268,7 +268,12 @@ module.exports.generateImagePrompts = async (req, res) => {
       //Skipping the page if we already have a prompt for it.
       if (page.imagePrompt && page.imagePrompt.length > 20) {
         console.log(`\n⏭️ Skipping Page ${page.pageNumber}. (Already Done)`);
-        previousPageSummary = await summarizeForContinuity(page.content);
+        if (page.pageSummary) previousPageSummary = page.pageSummary;
+        else {
+          previousPageSummary = await summarizeForContinuity(page.content);
+          page.pageSummary = previousPageSummary;
+          await page.save();
+        }
         continue;
       }
       console.log(`\n📜 Processing Page ${page.pageNumber}`);

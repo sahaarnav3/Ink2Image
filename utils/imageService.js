@@ -93,7 +93,7 @@ const generateAndUploadImage = async (
         },
       },
     });
-    for (const part of responseUsingNanoBanana.candidates[0].content.parts) {
+    for (const part of responseUsingNanoBanana?.candidates[0]?.content?.parts) {
       if (part.text) {
         console.log("\nResponse From GEMINI image generation:", part.text);
       } else if (part.inlineData) {

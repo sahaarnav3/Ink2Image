@@ -89,6 +89,7 @@ module.exports.startNeuralPipeline = async (req, res) => {
         );
         return res.status(200).json({
           message: "Pipeline active. Connecting to stream...",
+          isResuming: true,
           bookId: existingBook._id,
           status: existingBook.status,
           progress: existingBook.progress,
@@ -375,7 +376,13 @@ const generateImagePrompts = async (bookId) => {
   for (let page of pages) {
     //Skipping the page if we already have a prompt for it.
     if (page.imagePrompt && page.imagePrompt.length > 20) {
-      previousPageSummary = await summarizeForContinuity(page.content);
+      if(page.pageSummary)
+        previousPageSummary = page.pageSummary;
+      else {
+        previousPageSummary = await summarizeForContinuity(page.content);
+        page.pageSummary = previousPageSummary;
+        await page.save();
+      }
       continue;
     }
     //Now calling the AI function to actually create the prompt.
